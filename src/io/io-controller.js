@@ -18,7 +18,7 @@
 
 import Log from '../utils/logger.js';
 import SpeedSampler from './speed-sampler.js';
-import {LoaderStatus, LoaderErrors} from './loader.js';
+import { LoaderStatus, LoaderErrors } from './loader.js';
 import FetchStreamLoader from './fetch-stream-loader.js';
 import MozChunkedLoader from './xhr-moz-chunked-loader.js';
 import MSStreamLoader from './xhr-msstream-loader.js';
@@ -26,7 +26,8 @@ import RangeLoader from './xhr-range-loader.js';
 import WebSocketLoader from './websocket-loader.js';
 import RangeSeekHandler from './range-seek-handler.js';
 import ParamSeekHandler from './param-seek-handler.js';
-import {RuntimeException, IllegalStateException, InvalidArgumentException} from '../utils/exception.js';
+import { RuntimeException, IllegalStateException, InvalidArgumentException } from '../utils/exception.js';
+import FlashStreamLoader from './flash-stream-loader.js';
 
 /**
  * DataSource: {
@@ -47,7 +48,7 @@ class IOController {
         this._config = config;
         this._extraData = extraData;
 
-        this._stashInitialSize = 1024 * 384;  // default initial size: 384KB
+        this._stashInitialSize = 1024 * 384; // default initial size: 384KB
         if (config.stashInitialSize != undefined && config.stashInitialSize > 0) {
             // apply from config
             this._stashInitialSize = config.stashInitialSize;
@@ -55,7 +56,7 @@ class IOController {
 
         this._stashUsed = 0;
         this._stashSize = this._stashInitialSize;
-        this._bufferSize = 1024 * 1024 * 3;  // initial size: 3MB
+        this._bufferSize = 1024 * 1024 * 3; // initial size: 3MB
         this._stashBuffer = new ArrayBuffer(this._bufferSize);
         this._stashByteStart = 0;
         this._enableStash = true;
@@ -237,7 +238,9 @@ class IOController {
     }
 
     _selectLoader() {
-        if (this._isWebSocketURL) {
+        if (this._config.flashStreamLoaderLib) {
+            this._loaderClass = FlashStreamLoader;
+        } else if (this._isWebSocketURL) {
             this._loaderClass = WebSocketLoader;
         } else if (FetchStreamLoader.isSupported()) {
             this._loaderClass = FetchStreamLoader;
@@ -263,7 +266,7 @@ class IOController {
     }
 
     open(optionalFrom) {
-        this._currentRange = {from: 0, to: -1};
+        this._currentRange = { from: 0, to: -1 };
         if (optionalFrom) {
             this._currentRange.from = optionalFrom;
         }
@@ -334,8 +337,8 @@ class IOController {
         this._loader.destroy();
         this._loader = null;
 
-        let requestRange = {from: bytes, to: -1};
-        this._currentRange = {from: requestRange.from, to: -1};
+        let requestRange = { from: bytes, to: -1 };
+        this._currentRange = { from: requestRange.from, to: -1 };
 
         this._speedSampler.reset();
         this._stashSize = this._stashInitialSize;
@@ -363,14 +366,14 @@ class IOController {
             bufferNewSize *= 2;
         }
 
-        bufferNewSize += 1024 * 1024 * 1;  // bufferSize = stashSize + 1MB
+        bufferNewSize += 1024 * 1024 * 1; // bufferSize = stashSize + 1MB
         if (bufferNewSize === this._bufferSize) {
             return;
         }
 
         let newBuffer = new ArrayBuffer(bufferNewSize);
 
-        if (this._stashUsed > 0) {  // copy existing data into new buffer
+        if (this._stashUsed > 0) { // copy existing data into new buffer
             let stashOldArray = new Uint8Array(this._stashBuffer, 0, this._stashUsed);
             let stashNewArray = new Uint8Array(newBuffer, 0, bufferNewSize);
             stashNewArray.set(stashOldArray, 0);
@@ -424,7 +427,7 @@ class IOController {
             stashSizeKB = 8192;
         }
 
-        let bufferSize = stashSizeKB * 1024 + 1024 * 1024 * 1;  // stashSize + 1MB
+        let bufferSize = stashSizeKB * 1024 + 1024 * 1024 * 1; // stashSize + 1MB
         if (this._bufferSize < bufferSize) {
             this._expandBuffer(bufferSize);
         }
@@ -477,12 +480,12 @@ class IOController {
             }
         }
 
-        if (!this._enableStash) {  // disable stash
+        if (!this._enableStash) { // disable stash
             if (this._stashUsed === 0) {
                 // dispatch chunk directly to consumer;
                 // check ret value (consumed bytes) and stash unconsumed to stashBuffer
                 let consumed = this._dispatchChunks(chunk, byteStart);
-                if (consumed < chunk.byteLength) {  // unconsumed data remain.
+                if (consumed < chunk.byteLength) { // unconsumed data remain.
                     let remain = chunk.byteLength - consumed;
                     if (remain > this._bufferSize) {
                         this._expandBuffer(remain);
@@ -501,15 +504,15 @@ class IOController {
                 stashArray.set(new Uint8Array(chunk), this._stashUsed);
                 this._stashUsed += chunk.byteLength;
                 let consumed = this._dispatchChunks(this._stashBuffer.slice(0, this._stashUsed), this._stashByteStart);
-                if (consumed < this._stashUsed && consumed > 0) {  // unconsumed data remain
+                if (consumed < this._stashUsed && consumed > 0) { // unconsumed data remain
                     let remainArray = new Uint8Array(this._stashBuffer, consumed);
                     stashArray.set(remainArray, 0);
                 }
                 this._stashUsed -= consumed;
                 this._stashByteStart += consumed;
             }
-        } else {  // enable stash
-            if (this._stashUsed === 0 && this._stashByteStart === 0) {  // seeked? or init chunk?
+        } else { // enable stash
+            if (this._stashUsed === 0 && this._stashByteStart === 0) { // seeked? or init chunk?
                 // This is the first chunk after seek action
                 this._stashByteStart = byteStart;
             }
@@ -518,9 +521,9 @@ class IOController {
                 let stashArray = new Uint8Array(this._stashBuffer, 0, this._stashSize);
                 stashArray.set(new Uint8Array(chunk), this._stashUsed);
                 this._stashUsed += chunk.byteLength;
-            } else {  // stashUsed + chunkSize > stashSize, size limit exceeded
+            } else { // stashUsed + chunkSize > stashSize, size limit exceeded
                 let stashArray = new Uint8Array(this._stashBuffer, 0, this._bufferSize);
-                if (this._stashUsed > 0) {  // There're stash datas in buffer
+                if (this._stashUsed > 0) { // There're stash datas in buffer
                     // dispatch the whole stashBuffer, and stash remain data
                     // then append chunk to stashBuffer (stash)
                     let buffer = this._stashBuffer.slice(0, this._stashUsed);
@@ -542,7 +545,7 @@ class IOController {
                     }
                     stashArray.set(new Uint8Array(chunk), this._stashUsed);
                     this._stashUsed += chunk.byteLength;
-                } else {  // stash buffer empty, but chunkSize > stashSize (oh, holy shit)
+                } else { // stash buffer empty, but chunkSize > stashSize (oh, holy shit)
                     // dispatch chunk directly and stash remain data
                     let consumed = this._dispatchChunks(chunk, byteStart);
                     if (consumed < chunk.byteLength) {
@@ -608,24 +611,25 @@ class IOController {
         }
 
         switch (type) {
-            case LoaderErrors.EARLY_EOF: {
-                if (!this._config.isLive) {
-                    // Do internal http reconnect if not live stream
-                    if (this._totalLength) {
-                        let nextFrom = this._currentRange.to + 1;
-                        if (nextFrom < this._totalLength) {
-                            Log.w(this.TAG, 'Connection lost, trying reconnect...');
-                            this._isEarlyEofReconnecting = true;
-                            this._internalSeek(nextFrom, false);
+            case LoaderErrors.EARLY_EOF:
+                {
+                    if (!this._config.isLive) {
+                        // Do internal http reconnect if not live stream
+                        if (this._totalLength) {
+                            let nextFrom = this._currentRange.to + 1;
+                            if (nextFrom < this._totalLength) {
+                                Log.w(this.TAG, 'Connection lost, trying reconnect...');
+                                this._isEarlyEofReconnecting = true;
+                                this._internalSeek(nextFrom, false);
+                            }
+                            return;
                         }
-                        return;
+                        // else: We don't know totalLength, throw UnrecoverableEarlyEof
                     }
-                    // else: We don't know totalLength, throw UnrecoverableEarlyEof
+                    // live stream: throw UnrecoverableEarlyEof error to upper-layer
+                    type = LoaderErrors.UNRECOVERABLE_EARLY_EOF;
+                    break;
                 }
-                // live stream: throw UnrecoverableEarlyEof error to upper-layer
-                type = LoaderErrors.UNRECOVERABLE_EARLY_EOF;
-                break;
-            }
             case LoaderErrors.UNRECOVERABLE_EARLY_EOF:
             case LoaderErrors.CONNECTING_TIMEOUT:
             case LoaderErrors.HTTP_STATUS_CODE_INVALID:

@@ -31,13 +31,16 @@ export const defaultConfig = {
     statisticsInfoReportInterval: 600,
 
     accurateSeek: false,
-    seekType: 'range',  // [range, param, custom]
+    seekType: 'range', // [range, param, custom]
     seekParamStart: 'bstart',
     seekParamEnd: 'bend',
     rangeLoadZeroStart: false,
     customSeekHandler: undefined,
-    reuseRedirectedURL: false
+    reuseRedirectedURL: false,
     // referrerPolicy: leave as unspecified
+
+    //flash-stream-loader lib
+    flashStreamLoaderLib: undefined
 };
 
 export function createDefaultConfig() {
