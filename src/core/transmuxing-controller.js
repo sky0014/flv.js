@@ -31,7 +31,7 @@ import {LoaderStatus, LoaderErrors} from '../io/loader.js';
 class TransmuxingController {
 
     constructor(mediaDataSource, config) {
-        this.TAG = this.constructor.name;
+        this.TAG = 'TransmuxingController';
         this._emitter = new EventEmitter();
 
         this._config = config;
@@ -64,6 +64,10 @@ class TransmuxingController {
             // params needed by IOController
             segment.cors = mediaDataSource.cors;
             segment.withCredentials = mediaDataSource.withCredentials;
+            // referrer policy control, if exist
+            if (config.referrerPolicy) {
+                segment.referrerPolicy = config.referrerPolicy;
+            }
         });
 
         if (!isNaN(totalDuration) && this._mediaDataSource.duration !== totalDuration) {
@@ -77,12 +81,17 @@ class TransmuxingController {
 
         this._pendingSeekTime = null;
         this._pendingResolveSeekPoint = null;
+
+        this._statisticsReporter = null;
     }
 
     destroy() {
         this._mediaInfo = null;
         this._mediaDataSource = null;
 
+        if (this._statisticsReporter) {
+            this._disableStatisticsReporter();
+        }
         if (this._ioctl) {
             this._ioctl.destroy();
             this._ioctl = null;
@@ -110,6 +119,7 @@ class TransmuxingController {
 
     start() {
         this._loadSegment(0);
+        this._enableStatisticsReporter();
     }
 
     _loadSegment(segmentIndex, optionalFrom) {
@@ -120,6 +130,7 @@ class TransmuxingController {
         ioctl.onError = this._onIOException.bind(this);
         ioctl.onSeeked = this._onIOSeeked.bind(this);
         ioctl.onComplete = this._onIOComplete.bind(this);
+        ioctl.onRedirect = this._onIORedirect.bind(this);
         ioctl.onRecoveredEarlyEof = this._onIORecoveredEarlyEof.bind(this);
 
         if (optionalFrom) {
@@ -133,6 +144,7 @@ class TransmuxingController {
 
     stop() {
         this._internalAbort();
+        this._disableStatisticsReporter();
     }
 
     _internalAbort() {
@@ -145,20 +157,19 @@ class TransmuxingController {
     pause() {  // take a rest
         if (this._ioctl && this._ioctl.isWorking()) {
             this._ioctl.pause();
+            this._disableStatisticsReporter();
         }
     }
 
     resume() {
         if (this._ioctl && this._ioctl.isPaused()) {
             this._ioctl.resume();
+            this._enableStatisticsReporter();
         }
     }
 
     seek(milliseconds) {
-        if (this._mediaInfo == null) {
-            return;
-        }
-        if (!this._mediaInfo.isSeekable()) {
+        if (this._mediaInfo == null || !this._mediaInfo.isSeekable()) {
             return;
         }
 
@@ -197,11 +208,15 @@ class TransmuxingController {
                 this._internalAbort();
                 this._remuxer.seek(milliseconds);
                 this._remuxer.insertDiscontinuity();
+                this._demuxer.resetMediaInfo();
                 this._demuxer.timestampBase = this._mediaDataSource.segments[targetSegmentIndex].timestampBase;
                 this._loadSegment(targetSegmentIndex, keyframe.fileposition);
                 this._pendingResolveSeekPoint = keyframe.milliseconds;
+                this._reportSegmentMediaInfo(targetSegmentIndex);
             }
         }
+
+        this._enableStatisticsReporter();
     }
 
     _searchSegmentIndexContains(milliseconds) {
@@ -239,6 +254,13 @@ class TransmuxingController {
             if (mds.duration != undefined && !isNaN(mds.duration)) {
                 this._demuxer.overridedDuration = mds.duration;
             }
+            if (typeof mds.hasAudio === 'boolean') {
+                this._demuxer.overridedHasAudio = mds.hasAudio;
+            }
+            if (typeof mds.hasVideo === 'boolean') {
+                this._demuxer.overridedHasVideo = mds.hasVideo;
+            }
+
             this._demuxer.timestampBase = mds.segments[this._currentSegmentIndex].timestampBase;
 
             this._demuxer.onError = this._onDemuxException.bind(this);
@@ -274,19 +296,14 @@ class TransmuxingController {
             this._mediaInfo.segments = [];
             this._mediaInfo.segmentCount = this._mediaDataSource.segments.length;
             Object.setPrototypeOf(this._mediaInfo, MediaInfo.prototype);
-
-            let exportInfo = Object.assign({}, this._mediaInfo);
-            delete exportInfo.segments;
-            delete exportInfo.keyframesIndex;
-            this._emitter.emit(TransmuxingEvents.MEDIA_INFO, exportInfo);
         }
 
-        if (this._mediaInfo.segments[this._currentSegmentIndex] == undefined) {
-            let segmentInfo = Object.assign({}, mediaInfo);
-            Object.setPrototypeOf(segmentInfo, MediaInfo.prototype);
+        let segmentInfo = Object.assign({}, mediaInfo);
+        Object.setPrototypeOf(segmentInfo, MediaInfo.prototype);
+        this._mediaInfo.segments[this._currentSegmentIndex] = segmentInfo;
 
-            this._mediaInfo.segments[this._currentSegmentIndex] = segmentInfo;
-        }
+        // notify mediaInfo update
+        this._reportSegmentMediaInfo(this._currentSegmentIndex);
 
         if (this._pendingSeekTime != null) {
             Promise.resolve().then(() => {
@@ -310,7 +327,13 @@ class TransmuxingController {
             this._loadSegment(nextSegmentIndex);
         } else {
             this._emitter.emit(TransmuxingEvents.LOADING_COMPLETE);
+            this._disableStatisticsReporter();
         }
+    }
+
+    _onIORedirect(redirectedURL) {
+        let segmentIndex = this._ioctl.extraData;
+        this._mediaDataSource.segments[segmentIndex].redirectedURL = redirectedURL;
     }
 
     _onIORecoveredEarlyEof() {
@@ -320,6 +343,7 @@ class TransmuxingController {
     _onIOException(type, info) {
         Log.e(this.TAG, `IOException: type = ${type}, code = ${info.code}, msg = ${info.msg}`);
         this._emitter.emit(TransmuxingEvents.IO_ERROR, type, info);
+        this._disableStatisticsReporter();
     }
 
     _onDemuxException(type, info) {
@@ -338,6 +362,7 @@ class TransmuxingController {
         }
         this._emitter.emit(TransmuxingEvents.MEDIA_SEGMENT, type, mediaSegment);
 
+        // Resolve pending seekPoint
         if (this._pendingResolveSeekPoint != null && type === 'video') {
             let syncPoints = mediaSegment.info.syncPoints;
             let seekpoint = this._pendingResolveSeekPoint;
@@ -351,15 +376,44 @@ class TransmuxingController {
 
             this._emitter.emit(TransmuxingEvents.RECOMMEND_SEEKPOINT, seekpoint);
         }
+    }
 
-        if (type === 'video') {
-            this._reportStatisticsInfo();
+    _enableStatisticsReporter() {
+        if (this._statisticsReporter == null) {
+            this._statisticsReporter = self.setInterval(
+                this._reportStatisticsInfo.bind(this),
+            this._config.statisticsInfoReportInterval);
         }
+    }
+
+    _disableStatisticsReporter() {
+        if (this._statisticsReporter) {
+            self.clearInterval(this._statisticsReporter);
+            this._statisticsReporter = null;
+        }
+    }
+
+    _reportSegmentMediaInfo(segmentIndex) {
+        let segmentInfo = this._mediaInfo.segments[segmentIndex];
+        let exportInfo = Object.assign({}, segmentInfo);
+
+        exportInfo.duration = this._mediaInfo.duration;
+        exportInfo.segmentCount = this._mediaInfo.segmentCount;
+        delete exportInfo.segments;
+        delete exportInfo.keyframesIndex;
+
+        this._emitter.emit(TransmuxingEvents.MEDIA_INFO, exportInfo);
     }
 
     _reportStatisticsInfo() {
         let info = {};
-        info.url = this._ioctl.currentUrl;
+
+        info.url = this._ioctl.currentURL;
+        info.hasRedirect = this._ioctl.hasRedirect;
+        if (info.hasRedirect) {
+            info.redirectedURL = this._ioctl.currentRedirectedURL;
+        }
+
         info.speed = this._ioctl.currentSpeed;
         info.loaderType = this._ioctl.loaderType;
         info.currentSegmentIndex = this._currentSegmentIndex;

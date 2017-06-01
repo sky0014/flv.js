@@ -25,6 +25,7 @@ export const defaultConfig = {
 
     lazyLoad: true,
     lazyLoadMaxDuration: 3 * 60,
+    lazyLoadRecoverDuration: 30,
     deferLoadAfterSourceOpen: true,
 
     statisticsInfoReportInterval: 600,
@@ -34,7 +35,9 @@ export const defaultConfig = {
     seekParamStart: 'bstart',
     seekParamEnd: 'bend',
     rangeLoadZeroStart: false,
-    customSeekHandler: undefined
+    customSeekHandler: undefined,
+    reuseRedirectedURL: false
+    // referrerPolicy: leave as unspecified
 };
 
 export function createDefaultConfig() {

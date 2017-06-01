@@ -1,14 +1,14 @@
 
-flv.js
+flv.js  [![npm](https://img.shields.io/npm/v/flv.js.svg?style=flat)](https://www.npmjs.com/package/flv.js)
 ======
-HTML5 Flash Video(FLV) Player, written in pure JavaScript without Flash. LONG LIVE FLV!
+An HTML5 Flash Video (FLV) Player written in pure JavaScript without Flash. LONG LIVE FLV!
 
-This project relies on [Media Source Extensions][], and inspired by [hls.js][].
+This project relies on [Media Source Extensions][] to work.
 
-### Overview
-A JavaScript library which implements Flash Video(FLV) format playback in HTML5 video. It works by transmuxing FLV file stream into ISO BMFF (Fragmented MP4) segments, then feed mp4 segments into browser through [Media Source Extensions][] API.
+## Overview
+flv.js works by transmuxing FLV file stream into ISO BMFF (Fragmented MP4) segments, followed by feeding mp4 segments into an HTML5 `<video>` element through [Media Source Extensions][] API.
 
-flv.js is written in [ECMAScript 6][], and transpiled into ECMAScript 5 by [Babel Compiler][], bundled with [Browserify][].
+flv.js is written in [ECMAScript 6][], transpiled into ECMAScript 5 by [Babel Compiler][], and bundled with [Browserify][].
 
 [Media Source Extensions]: https://w3c.github.io/media-source/
 [hls.js]: https://github.com/dailymotion/hls.js
@@ -16,15 +16,20 @@ flv.js is written in [ECMAScript 6][], and transpiled into ECMAScript 5 by [Babe
 [Babel Compiler]: https://babeljs.io/
 [Browserify]: http://browserify.org/
 
-### Features
-- FLV container with H.264 + AAC codec playback
+## Features
+- FLV container with H.264 + AAC / MP3 codec playback
 - Multipart segmented video playback
 - HTTP FLV low latency live stream playback
 - FLV over WebSocket live stream playback
 - Compatible with Chrome, FireFox, Safari 10, IE11 and Edge
-- Extermely low overhead, and hardware accelerated by your browser!
+- Extremely low overhead, and hardware accelerated by your browser!
 
-### Build
+## Installation
+```bash
+npm install --save flv.js
+```
+
+## Build
 ```bash
 npm install          # install dev-dependences
 npm install -g gulp  # install build tool
@@ -33,8 +38,13 @@ gulp release         # packaged & minimized js will be emitted in dist folder
 
 [cnpm](https://github.com/cnpm/cnpm) mirror is recommended if you are in Mainland China.
 
-### Getting Started
-```js
+## CORS
+If you use standalone video server for FLV stream, `Access-Control-Allow-Origin` header must be configured correctly on video server for cross-origin resource fetching.
+
+See [cors.md](docs/cors.md) for more details.
+
+## Getting Started
+```html
 <script src="flv.min.js"></script>
 <video id="videoElement"></video>
 <script>
@@ -51,7 +61,23 @@ gulp release         # packaged & minimized js will be emitted in dist folder
 </script>
 ```
 
-### License
+## Limitations
+- MP3 audio codec is currently not working on IE11 / Edge
+- HTTP FLV live stream is not currently working on all browsers, see [livestream.md](docs/livestream.md)
+
+## Multipart playback
+You only have to provide a playlist for `MediaDataSource`. See [multipart.md](docs/multipart.md)
+
+## Livestream playback
+See [livestream.md](docs/livestream.md)
+
+## API and Configuration
+See [api.md](docs/api.md)
+
+## Design
+See [design.md](docs/design.md)
+
+## License
 ```
 Copyright (C) 2016 Bilibili. All Rights Reserved.
 

@@ -42,15 +42,12 @@ import {RuntimeException, IllegalStateException, InvalidArgumentException} from 
 class IOController {
 
     constructor(dataSource, config, extraData) {
-        this.TAG = this.constructor.name;
+        this.TAG = 'IOController';
 
         this._config = config;
         this._extraData = extraData;
 
         this._stashInitialSize = 1024 * 384;  // default initial size: 384KB
-        if (config.isLive === true) {
-            this._stashInitialSize = 1024 * 512;  // default live initial size: 512KB
-        }
         if (config.stashInitialSize != undefined && config.stashInitialSize > 0) {
             // apply from config
             this._stashInitialSize = config.stashInitialSize;
@@ -71,13 +68,13 @@ class IOController {
         this._seekHandler = null;
 
         this._dataSource = dataSource;
-        this._isWebSocketURL = /wss?:\/\/(.+?)\//.test(dataSource.url);
+        this._isWebSocketURL = /wss?:\/\/(.+?)/.test(dataSource.url);
         this._refTotalLength = dataSource.filesize ? dataSource.filesize : null;
         this._totalLength = this._refTotalLength;
         this._fullRequestFlag = false;
         this._currentRange = null;
+        this._redirectedURL = null;
 
-        this._speed = 0;
         this._speedNormalized = 0;
         this._speedSampler = new SpeedSampler();
         this._speedNormalizeList = [64, 128, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096];
@@ -91,6 +88,7 @@ class IOController {
         this._onSeeked = null;
         this._onError = null;
         this._onComplete = null;
+        this._onRedirect = null;
         this._onRecoveredEarlyEof = null;
 
         this._selectSeekHandler();
@@ -117,6 +115,7 @@ class IOController {
         this._onSeeked = null;
         this._onError = null;
         this._onComplete = null;
+        this._onRedirect = null;
         this._onRecoveredEarlyEof = null;
 
         this._extraData = null;
@@ -176,6 +175,14 @@ class IOController {
         this._onComplete = callback;
     }
 
+    get onRedirect() {
+        return this._onRedirect;
+    }
+
+    set onRedirect(callback) {
+        this._onRedirect = callback;
+    }
+
     get onRecoveredEarlyEof() {
         return this._onRecoveredEarlyEof;
     }
@@ -184,17 +191,25 @@ class IOController {
         this._onRecoveredEarlyEof = callback;
     }
 
-    get currentUrl() {
+    get currentURL() {
         return this._dataSource.url;
+    }
+
+    get hasRedirect() {
+        return (this._redirectedURL != null || this._dataSource.redirectedURL != undefined);
+    }
+
+    get currentRedirectedURL() {
+        return this._redirectedURL || this._dataSource.redirectedURL;
     }
 
     // in KB/s
     get currentSpeed() {
         if (this._loaderClass === RangeLoader) {
-            // this._speed is inaccuracy if loader is RangeLoader
+            // SpeedSampler is inaccuracy if loader is RangeLoader
             return this._loader.currentSpeed;
         }
-        return this._speed;
+        return this._speedSampler.lastSecondKBps;
     }
 
     get loaderType() {
@@ -236,11 +251,12 @@ class IOController {
     }
 
     _createLoader() {
-        this._loader = new this._loaderClass(this._seekHandler);
+        this._loader = new this._loaderClass(this._seekHandler, this._config);
         if (this._loader.needStashBuffer === false) {
             this._enableStash = false;
         }
         this._loader.onContentLengthKnown = this._onContentLengthKnown.bind(this);
+        this._loader.onURLRedirect = this._onURLRedirect.bind(this);
         this._loader.onDataArrival = this._onLoaderChunkArrival.bind(this);
         this._loader.onComplete = this._onLoaderComplete.bind(this);
         this._loader.onError = this._onLoaderError.bind(this);
@@ -321,7 +337,6 @@ class IOController {
         let requestRange = {from: bytes, to: -1};
         this._currentRange = {from: requestRange.from, to: -1};
 
-        this._speed = 0;
         this._speedSampler.reset();
         this._stashSize = this._stashInitialSize;
         this._createLoader();
@@ -421,6 +436,13 @@ class IOController {
         return this._onDataArrival(chunks, byteStart);
     }
 
+    _onURLRedirect(redirectedURL) {
+        this._redirectedURL = redirectedURL;
+        if (this._onRedirect) {
+            this._onRedirect(redirectedURL);
+        }
+    }
+
     _onContentLengthKnown(contentLength) {
         if (contentLength && this._fullRequestFlag) {
             this._totalLength = contentLength;
@@ -448,7 +470,6 @@ class IOController {
         // adjust stash buffer size according to network speed dynamically
         let KBps = this._speedSampler.lastSecondKBps;
         if (KBps !== 0) {
-            this._speed = KBps;
             let normalized = this._normalizeSpeed(KBps);
             if (this._speedNormalized !== normalized) {
                 this._speedNormalized = normalized;

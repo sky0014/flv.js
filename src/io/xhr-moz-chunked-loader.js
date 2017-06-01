@@ -36,11 +36,12 @@ class MozChunkedLoader extends BaseLoader {
         }
     }
 
-    constructor(seekHandler) {
+    constructor(seekHandler, config) {
         super('xhr-moz-chunked-loader');
-        this.TAG = this.constructor.name;
+        this.TAG = 'MozChunkedLoader';
 
         this._seekHandler = seekHandler;
+        this._config = config;
         this._needStash = true;
 
         this._xhr = null;
@@ -67,7 +68,13 @@ class MozChunkedLoader extends BaseLoader {
         this._dataSource = dataSource;
         this._range = range;
 
-        let seekConfig = this._seekHandler.getConfig(dataSource.url, range);
+        let sourceURL = dataSource.url;
+        if (this._config.reuseRedirectedURL && dataSource.redirectedURL != undefined) {
+            sourceURL = dataSource.redirectedURL;
+        }
+
+        let seekConfig = this._seekHandler.getConfig(sourceURL, range);
+        this._requestURL = seekConfig.url;
 
         let xhr = this._xhr = new XMLHttpRequest();
         xhr.open('GET', seekConfig.url, true);
@@ -110,6 +117,13 @@ class MozChunkedLoader extends BaseLoader {
         let xhr = e.target;
 
         if (xhr.readyState === 2) {  // HEADERS_RECEIVED
+            if (xhr.responseURL != undefined && xhr.responseURL !== this._requestURL) {
+                if (this._onURLRedirect) {
+                    let redirectedURL = this._seekHandler.removeURLParameters(xhr.responseURL);
+                    this._onURLRedirect(redirectedURL);
+                }
+            }
+
             if (xhr.status !== 0 && (xhr.status < 200 || xhr.status > 299)) {
                 this._status = LoaderStatus.kError;
                 if (this._onError) {

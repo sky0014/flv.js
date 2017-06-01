@@ -36,18 +36,18 @@ class RangeLoader extends BaseLoader {
         }
     }
 
-    constructor(seekHandler) {
+    constructor(seekHandler, config) {
         super('xhr-range-loader');
-        this.TAG = this.constructor.name;
+        this.TAG = 'RangeLoader';
 
         this._seekHandler = seekHandler;
+        this._config = config;
         this._needStash = false;
 
         this._chunkSizeKBList = [
             128, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096, 5120, 6144, 7168, 8192
         ];
         this._currentChunkSizeKB = 384;
-        this._currentSpeed = 0;
         this._currentSpeedNormalized = 0;
         this._zeroSpeedChunkCount = 0;
 
@@ -58,6 +58,8 @@ class RangeLoader extends BaseLoader {
         this._waitForTotalLength = false;
         this._totalLengthReceived = false;
 
+        this._currentRequestURL = null;
+        this._currentRedirectedURL = null;
         this._currentRequestRange = null;
         this._totalLength = null;  // size of the entire file
         this._contentLength = null;  // Content-Length of entire request range
@@ -80,7 +82,7 @@ class RangeLoader extends BaseLoader {
     }
 
     get currentSpeed() {
-        return this._currentSpeed;
+        return this._speedSampler.lastSecondKBps;
     }
 
     open(dataSource, range) {
@@ -117,7 +119,17 @@ class RangeLoader extends BaseLoader {
     _internalOpen(dataSource, range) {
         this._lastTimeLoaded = 0;
 
-        let seekConfig = this._seekHandler.getConfig(dataSource.url, range);
+        let sourceURL = dataSource.url;
+        if (this._config.reuseRedirectedURL) {
+            if (this._currentRedirectedURL != undefined) {
+                sourceURL = this._currentRedirectedURL;
+            } else if (dataSource.redirectedURL != undefined) {
+                sourceURL = dataSource.redirectedURL;
+            }
+        }
+
+        let seekConfig = this._seekHandler.getConfig(sourceURL, range);
+        this._currentRequestURL = seekConfig.url;
 
         let xhr = this._xhr = new XMLHttpRequest();
         xhr.open('GET', seekConfig.url, true);
@@ -165,7 +177,17 @@ class RangeLoader extends BaseLoader {
         let xhr = e.target;
 
         if (xhr.readyState === 2) {  // HEADERS_RECEIVED
-            if ((xhr.status >= 200 && xhr.status < 300)) {
+            if (xhr.responseURL != undefined) {  // if the browser support this property
+                let redirectedURL = this._seekHandler.removeURLParameters(xhr.responseURL);
+                if (xhr.responseURL !== this._currentRequestURL && redirectedURL !== this._currentRedirectedURL) {
+                    this._currentRedirectedURL = redirectedURL;
+                    if (this._onURLRedirect) {
+                        this._onURLRedirect(redirectedURL);
+                    }
+                }
+            }
+
+            if ((xhr.status >= 200 && xhr.status <= 299)) {
                 if (this._waitForTotalLength) {
                     return;
                 }
@@ -258,7 +280,6 @@ class RangeLoader extends BaseLoader {
         }
 
         if (KBps !== 0) {
-            this._currentSpeed = KBps;
             let normalized = this._normalizeSpeed(KBps);
             if (this._currentSpeedNormalized !== normalized) {
                 this._currentSpeedNormalized = normalized;
