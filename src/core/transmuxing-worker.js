@@ -39,6 +39,7 @@ let TransmuxingWorker = function (self) {
 
     let TAG = 'TransmuxingWorker';
     let controller = null;
+    let logcatListener = onLogcatCallback.bind(this);
 
     Polyfill.install();
 
@@ -53,6 +54,8 @@ let TransmuxingWorker = function (self) {
                 controller.on(TransmuxingEvents.LOADING_COMPLETE, onLoadingComplete.bind(this));
                 controller.on(TransmuxingEvents.RECOVERED_EARLY_EOF, onRecoveredEarlyEof.bind(this));
                 controller.on(TransmuxingEvents.MEDIA_INFO, onMediaInfo.bind(this));
+                controller.on(TransmuxingEvents.METADATA_ARRIVED, onMetaDataArrived.bind(this));
+                controller.on(TransmuxingEvents.SCRIPTDATA_ARRIVED, onScriptDataArrived.bind(this));
                 controller.on(TransmuxingEvents.STATISTICS_INFO, onStatisticsInfo.bind(this));
                 controller.on(TransmuxingEvents.RECOMMEND_SEEKPOINT, onRecommendSeekpoint.bind(this));
                 break;
@@ -78,9 +81,17 @@ let TransmuxingWorker = function (self) {
             case 'resume':
                 controller.resume();
                 break;
-            case 'logging_config':
-                LoggingControl.applyConfig(e.data.param);
+            case 'logging_config': {
+                let config = e.data.param;
+                LoggingControl.applyConfig(config);
+
+                if (config.enableCallback === true) {
+                    LoggingControl.addLogListener(logcatListener);
+                } else {
+                    LoggingControl.removeLogListener(logcatListener);
+                }
                 break;
+            }
         }
     });
 
@@ -128,6 +139,22 @@ let TransmuxingWorker = function (self) {
         self.postMessage(obj);
     }
 
+    function onMetaDataArrived(metadata) {
+        let obj = {
+            msg: TransmuxingEvents.METADATA_ARRIVED,
+            data: metadata
+        };
+        self.postMessage(obj);
+    }
+
+    function onScriptDataArrived(data) {
+        let obj = {
+            msg: TransmuxingEvents.SCRIPTDATA_ARRIVED,
+            data: data
+        };
+        self.postMessage(obj);
+    }
+
     function onStatisticsInfo(statInfo) {
         let obj = {
             msg: TransmuxingEvents.STATISTICS_INFO,
@@ -160,6 +187,16 @@ let TransmuxingWorker = function (self) {
         self.postMessage({
             msg: TransmuxingEvents.RECOMMEND_SEEKPOINT,
             data: milliseconds
+        });
+    }
+
+    function onLogcatCallback(type, str) {
+        self.postMessage({
+            msg: 'logcat_callback',
+            data: {
+                type: type,
+                logcat: str
+            }
         });
     }
 

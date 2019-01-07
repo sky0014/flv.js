@@ -136,7 +136,7 @@ class FlvPlayer {
         mediaElement.addEventListener('stalled', this.e.onvStalled);
         mediaElement.addEventListener('progress', this.e.onvProgress);
 
-        this._msectl = new MSEController();
+        this._msectl = new MSEController(this._config);
 
         this._msectl.on(MSEEvents.UPDATE_END, this._onmseUpdateEnd.bind(this));
         this._msectl.on(MSEEvents.BUFFER_FULL, this._onmseBufferFull.bind(this));
@@ -242,6 +242,12 @@ class FlvPlayer {
             this._mediaInfo = mediaInfo;
             this._emitter.emit(PlayerEvents.MEDIA_INFO, Object.assign({}, mediaInfo));
         });
+        this._transmuxer.on(TransmuxingEvents.METADATA_ARRIVED, (metadata) => {
+            this._emitter.emit(PlayerEvents.METADATA_ARRIVED, metadata);
+        });
+        this._transmuxer.on(TransmuxingEvents.SCRIPTDATA_ARRIVED, (data) => {
+            this._emitter.emit(PlayerEvents.SCRIPTDATA_ARRIVED, data);
+        });
         this._transmuxer.on(TransmuxingEvents.STATISTICS_INFO, (statInfo) => {
             this._statisticsInfo = this._fillStatisticsInfo(statInfo);
             this._emitter.emit(PlayerEvents.STATISTICS_INFO, Object.assign({}, this._statisticsInfo));
@@ -271,7 +277,7 @@ class FlvPlayer {
     }
 
     play() {
-        this._mediaElement.play();
+        return this._mediaElement.play();
     }
 
     pause() {
